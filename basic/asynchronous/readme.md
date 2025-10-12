@@ -11,6 +11,10 @@
 
 ---
 
+There are two ways to use computer resource 
+1. Concurrency: parallelism using concurrency the start and stop time of multiple co-routines can overlap
+2. parallelism: With parallelism different threads can execute at the same time
+
 ## 🧠 When to Use Which?
 
 | Feature                | Synchronous (Blocking)                      | Asynchronous (Non-Blocking)                         |
