@@ -236,5 +236,3 @@ asyncio.run(main())
 - **Coroutine**: An `async def` function that can be paused/resumed via `await`.
 
 ---
-
-> _Copy this file to your repo as `SYNC-vs-ASYNC.md` (or any name you like). It’s designed to render cleanly on GitHub, including Mermaid diagrams._
