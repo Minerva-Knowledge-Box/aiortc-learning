@@ -46,7 +46,7 @@ Networking usually has two roles:
 
 \- \*\*TCP: transmission control protocol (SOCK\_STREAM)\*\*: Reliable, connection oriented (like WhatsApp messages).  
 
-\- \*\*UDP: user data gram protocol (SOCK\_DGRAM)\*\*: Fast, connection less, but no guarantee (like live video streaming).
+\- \*\*UDP: user data gram protocol (SOCK\_DGRAM)\*\*: Fast, connectionless, but no guarantee (like live video streaming).
 
 
 
