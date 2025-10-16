@@ -2,94 +2,113 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>aiortc on Django</title>
+    <title>Django aiortc — File Streaming</title>
     <style>
       body { font-family: system-ui, sans-serif; margin: 2rem; }
-      video { width: 480px; height: 360px; background: #000; display:block; }
+      video { width: 720px; max-width: 100%; background: #000; display:block; }
       button { padding:.6rem 1rem; margin-top:1rem; }
-      .row { display:flex; gap:1.5rem; align-items:flex-start; flex-wrap:wrap; }
-      .note { margin-top:1rem; opacity:.75; }
+      .note { margin-top:.6rem; opacity:.75; }
+      pre { background:#111; color:#eee; padding:8px; overflow:auto; max-height:220px;}
     </style>
   </head>
   <body>
-    <h1>Webcam → Django (aiortc)</h1>
+    <h1>Stream file from server → browser (WebRTC)</h1>
 
-    <div class="row">
-      <div>
-        <h3>Local preview</h3>
-        <video id="local" autoplay playsinline muted></video>
-        <button id="start">Start streaming</button>
-        <p class="note">After a few seconds, check <code>recordings/out.mp4</code> on the server.</p>
-      </div>
-
-      <div>
-        <h3>Remote (from Python) — optional</h3>
-        <!-- IMPORTANT: muted so autoplay works on Chrome/Safari -->
-        <video id="remote" autoplay playsinline muted></video>
-        <p class="note">You’ll see video here if the server adds a track back to the PeerConnection.</p>
-      </div>
+    <video id="remote" autoplay playsinline controls muted></video>
+    <div style="display:flex; gap:12px; align-items:center; margin-top:10px;">
+      <button id="playBtn">Play</button>
+      <button id="stopBtn">Stop</button>
     </div>
+    <p class="note">
+      Server streams <code>videos/sample.mp4</code> (or a test pattern if the file can't be decoded).
+    </p>
+
+    <pre id="log"></pre>
 
     <script>
-      const startBtn = document.getElementById('start');
-      const localVideo = document.getElementById('local');
+      const btn = document.getElementById('playBtn');
+      const stopBtn = document.getElementById('stopBtn');
       const remoteVideo = document.getElementById('remote');
+      const logEl = document.getElementById('log');
       let pc;
 
-      async function start() {
-        startBtn.disabled = true;
+      function log(...args) {
+        const line = args.map(x => (typeof x === 'string' ? x : JSON.stringify(x))).join(' ');
+        console.log(line);
+        logEl.textContent += line + "\n";
+      }
 
-        // 1) capture webcam
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        localVideo.srcObject = stream;
-
-        // 2) RTCPeerConnection
-        pc = new RTCPeerConnection({
-          iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      function waitForICEGatheringComplete(pc) {
+        if (pc.iceGatheringState === 'complete') return Promise.resolve();
+        return new Promise(resolve => {
+          const check = () => {
+            log('iceGatheringState:', pc.iceGatheringState);
+            if (pc.iceGatheringState === 'complete') {
+              pc.removeEventListener('icegatheringstatechange', check);
+              resolve();
+            }
+          };
+          pc.addEventListener('icegatheringstatechange', check);
         });
+      }
 
-        // helpful logs
-        pc.oniceconnectionstatechange = () => console.log('ice state:', pc.iceConnectionState);
-        pc.onconnectionstatechange = () => console.log('pc state:', pc.connectionState);
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
 
-        // 3) show whatever the server sends back
+        pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+
+        pc.oniceconnectionstatechange = () => log('ice state:', pc.iceConnectionState);
+        pc.onconnectionstatechange = () => log('pc state:', pc.connectionState);
+
+        // We only RECEIVE media
+        pc.addTransceiver('video', { direction: 'recvonly' });
+        pc.addTransceiver('audio', { direction: 'recvonly' });
+
         pc.ontrack = (e) => {
-          // first event includes a stream; reuse that object so audio/video tracks attach automatically
+          log('ontrack kind=', e.track.kind);
           if (e.streams && e.streams[0]) {
             if (!remoteVideo.srcObject) remoteVideo.srcObject = e.streams[0];
           } else {
-            // very old browsers may not provide streams; fall back
             const inbound = remoteVideo.srcObject || new MediaStream();
             inbound.addTrack(e.track);
             remoteVideo.srcObject = inbound;
           }
         };
 
-        // 4) add local tracks
-        stream.getTracks().forEach(t => pc.addTrack(t, stream));
-
-        // 5) create & send offer (no trickle ICE for simplicity)
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
+        await waitForICEGatheringComplete(pc); // single-shot
 
         const resp = await fetch('/offer', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type })
         });
+
+        if (!resp.ok) {
+          const txt = await resp.text();
+          log('Server error:', txt);
+          btn.disabled = false;
+          return;
+        }
+
         const answer = await resp.json();
         await pc.setRemoteDescription(answer);
+        log('Answer set; waiting for ontrack…');
+      });
 
-        console.log('Streaming to Django. Recording to recordings/out.mp4');
-      }
+      stopBtn.addEventListener('click', () => {
+        if (pc) pc.close();
+        if (remoteVideo.srcObject) {
+          remoteVideo.srcObject.getTracks().forEach(t => t.stop());
+          remoteVideo.srcObject = null;
+        }
+        btn.disabled = false;
+        log('Stopped.');
+      });
 
-      startBtn.addEventListener('click', start);
-
-      // clean up if user leaves
       window.addEventListener('beforeunload', () => {
         if (pc) pc.close();
-        const s = localVideo.srcObject;
-        if (s) s.getTracks().forEach(t => t.stop());
       });
     </script>
   </body>
