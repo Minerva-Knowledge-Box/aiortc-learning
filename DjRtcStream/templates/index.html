@@ -1,0 +1,96 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>aiortc on Django</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem; }
+      video { width: 480px; height: 360px; background: #000; display:block; }
+      button { padding:.6rem 1rem; margin-top:1rem; }
+      .row { display:flex; gap:1.5rem; align-items:flex-start; flex-wrap:wrap; }
+      .note { margin-top:1rem; opacity:.75; }
+    </style>
+  </head>
+  <body>
+    <h1>Webcam → Django (aiortc)</h1>
+
+    <div class="row">
+      <div>
+        <h3>Local preview</h3>
+        <video id="local" autoplay playsinline muted></video>
+        <button id="start">Start streaming</button>
+        <p class="note">After a few seconds, check <code>recordings/out.mp4</code> on the server.</p>
+      </div>
+
+      <div>
+        <h3>Remote (from Python) — optional</h3>
+        <!-- IMPORTANT: muted so autoplay works on Chrome/Safari -->
+        <video id="remote" autoplay playsinline muted></video>
+        <p class="note">You’ll see video here if the server adds a track back to the PeerConnection.</p>
+      </div>
+    </div>
+
+    <script>
+      const startBtn = document.getElementById('start');
+      const localVideo = document.getElementById('local');
+      const remoteVideo = document.getElementById('remote');
+      let pc;
+
+      async function start() {
+        startBtn.disabled = true;
+
+        // 1) capture webcam
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        localVideo.srcObject = stream;
+
+        // 2) RTCPeerConnection
+        pc = new RTCPeerConnection({
+          iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        });
+
+        // helpful logs
+        pc.oniceconnectionstatechange = () => console.log('ice state:', pc.iceConnectionState);
+        pc.onconnectionstatechange = () => console.log('pc state:', pc.connectionState);
+
+        // 3) show whatever the server sends back
+        pc.ontrack = (e) => {
+          // first event includes a stream; reuse that object so audio/video tracks attach automatically
+          if (e.streams && e.streams[0]) {
+            if (!remoteVideo.srcObject) remoteVideo.srcObject = e.streams[0];
+          } else {
+            // very old browsers may not provide streams; fall back
+            const inbound = remoteVideo.srcObject || new MediaStream();
+            inbound.addTrack(e.track);
+            remoteVideo.srcObject = inbound;
+          }
+        };
+
+        // 4) add local tracks
+        stream.getTracks().forEach(t => pc.addTrack(t, stream));
+
+        // 5) create & send offer (no trickle ICE for simplicity)
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        const resp = await fetch('/offer', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sdp: pc.localDescription.sdp, type: pc.localDescription.type })
+        });
+        const answer = await resp.json();
+        await pc.setRemoteDescription(answer);
+
+        console.log('Streaming to Django. Recording to recordings/out.mp4');
+      }
+
+      startBtn.addEventListener('click', start);
+
+      // clean up if user leaves
+      window.addEventListener('beforeunload', () => {
+        if (pc) pc.close();
+        const s = localVideo.srcObject;
+        if (s) s.getTracks().forEach(t => t.stop());
+      });
+    </script>
+  </body>
+</html>
